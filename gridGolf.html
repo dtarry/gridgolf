@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grid Golf</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #f5f5f0;
+    --surface: #ffffff;
+    --surface2: #f0ede8;
+    --border: rgba(0,0,0,0.12);
+    --border2: rgba(0,0,0,0.22);
+    --text: #1a1a1a;
+    --text2: #555;
+    --text3: #888;
+    --radius: 8px;
+    --radius-lg: 12px;
+    --info-bg: #e6f1fb;
+    --info-text: #0c447c;
+    --info-border: #185fa5;
+    --warn-bg: #faeeda;
+    --warn-text: #633806;
+    --warn-border: #854f0b;
+    --success-bg: #eaf3de;
+    --success-text: #27500a;
+    --success-border: #3b6d11;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --surface: #252525;
+      --surface2: #2e2e2e;
+      --border: rgba(255,255,255,0.1);
+      --border2: rgba(255,255,255,0.2);
+      --text: #f0f0f0;
+      --text2: #aaa;
+      --text3: #666;
+      --info-bg: #0c2a45;
+      --info-text: #85b7eb;
+      --info-border: #185fa5;
+      --warn-bg: #2e1f00;
+      --warn-text: #fac775;
+      --warn-border: #854f0b;
+      --success-bg: #1a2e0a;
+      --success-text: #c0dd97;
+      --success-border: #3b6d11;
+    }
+  }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 20px; font-weight: 600; }
+  h2 { font-size: 16px; font-weight: 500; }
+
+  /* Layout */
+  .screen { display: none; padding: 1rem; }
+  .screen.active { display: block; }
+
+  /* Setup */
+  .setup-wrap { max-width: 380px; margin: 3rem auto; }
+  .setup-header { text-align: center; margin-bottom: 1.5rem; }
+  .setup-header h1 { font-size: 28px; margin-bottom: 4px; }
+  .setup-header p { color: var(--text2); font-size: 13px; }
+  .card {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.25rem;
+  }
+  .card + .card { margin-top: 10px; }
+  .card-title {
+    font-size: 10px; font-weight: 600; color: var(--text2);
+    text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px;
+  }
+  .form-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .form-row label { font-size: 12px; color: var(--text2); width: 80px; flex-shrink: 0; }
+  select, input[type="text"] {
+    font-size: 12px; padding: 5px 8px; border-radius: var(--radius);
+    border: 0.5px solid var(--border2); background: var(--surface);
+    color: var(--text); height: 30px; width: 100%;
+  }
+  select { cursor: pointer; }
+  .name-inputs { margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
+  .name-row { display: flex; gap: 8px; align-items: center; }
+  .color-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+  /* Buttons */
+  button {
+    font-size: 12px; font-weight: 500; padding: 7px 12px;
+    border-radius: var(--radius); border: 0.5px solid var(--border2);
+    background: var(--surface); color: var(--text);
+    cursor: pointer; transition: background .15s, transform .1s;
+  }
+  button:hover:not(:disabled) { background: var(--surface2); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn-primary { background: var(--info-bg); color: var(--info-text); border-color: var(--info-border); }
+  .btn-primary:hover:not(:disabled) { background: #d0e8f8; }
+  .btn-warn { background: var(--warn-bg); color: var(--warn-text); border-color: var(--warn-border); }
+  .btn-warn:hover:not(:disabled) { background: #f0dcb8; }
+  .btn-success { background: var(--success-bg); color: var(--success-text); border-color: var(--success-border); }
+  .btn-full { width: 100%; font-size: 13px; padding: 9px; }
+
+  /* Game layout */
+  .game-top {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px; flex-wrap: wrap; gap: 8px;
+  }
+  .game-title { font-size: 14px; font-weight: 600; }
+  .game-sub { font-size: 11px; color: var(--text2); }
+  .game-main { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+
+  /* Grid */
+  .grid-wrap { overflow-x: auto; flex-shrink: 0; }
+  .grid-outer {
+    display: inline-block; border: 2px solid var(--border2);
+    border-radius: 4px; overflow: hidden; position: relative;
+  }
+  #courseCanvas { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 3; }
+  .grid-row { display: flex; }
+  .cell {
+    width: 32px; height: 21px; display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; font-family: 'Courier New', monospace;
+    cursor: default; position: relative; z-index: 1; user-select: none;
+  }
+  .cell-F { background: #a8d87b; color: #27500a; }
+  .cell-R { background: #6b9a40; color: #173404; }
+  .cell-B { background: #e8d89a; color: #633806; }
+  .cell-S { background: #c9e4a0; color: #27500a; }
+  .cell-T { background: #2d5a27; color: #c0dd97; }
+  .cell-W { background: #6ab4d8; color: #042c53; }
+  .cell-H {
+    background: #fff; color: #111; border: 2px solid #222; border-radius: 50%;
+    font-size: 8px; width: 19px; height: 19px; margin: 1px 6.5px;
+  }
+  .cell-TE { background: #ff7f40; color: #fff; border-radius: 3px; font-size: 8px; }
+  .cell.valid-move { outline: 2px solid #facc15; outline-offset: -2px; cursor: pointer; z-index: 2; }
+  .cell.valid-move:hover { outline: 3px solid #facc15; }
+
+  /* Panel */
+  .panel { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 8px; }
+  .player-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+  .player-tab {
+    font-size: 11px; padding: 3px 10px; border-radius: 20px;
+    border: 1.5px solid transparent; font-weight: 500; opacity: .5;
+    transition: opacity .2s, background .2s;
+  }
+  .player-tab.active { opacity: 1; }
+  .die-display { font-size: 32px; text-align: center; padding: 4px 0; }
+  .die-mod { font-size: 11px; color: var(--text2); text-align: center; min-height: 16px; }
+  .status-msg { font-size: 11px; font-weight: 600; min-height: 16px; margin-top: 2px; }
+  .btn-row { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
+  .btn-row button { flex: 1; min-width: 60px; }
+  .stat-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3px; }
+  .stat-label { font-size: 11px; color: var(--text2); }
+  .stat-val { font-size: 13px; font-weight: 600; }
+
+  /* Scorecard */
+  .sc-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  .sc-table th { font-size: 9px; color: var(--text2); font-weight: 500; padding: 2px 3px; text-align: center; border-bottom: 0.5px solid var(--border); }
+  .sc-table td { padding: 2px 3px; text-align: center; border-bottom: 0.5px solid var(--border); }
+  .sc-done { font-weight: 700; }
+  .sc-eagle { background: #b5d4f4; color: #042c53; }
+  .sc-birdie { background: #9fe1cb; color: #04342c; }
+  .sc-bogey { background: #fac775; color: #412402; }
+  .sc-dbogey { background: #f09595; color: #501313; }
+  .sc-total { font-weight: 700; }
+
+  /* Log */
+  .log { max-height: 110px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  .log-entry { font-size: 10px; color: var(--text2); padding: 2px 0; border-bottom: 0.5px solid var(--border); line-height: 1.4; }
+  .log-entry.key { color: var(--text); font-weight: 600; }
+
+  /* Win banner */
+  .win-banner { border-radius: var(--radius-lg); padding: 12px; text-align: center; }
+  .win-score { font-size: 20px; font-weight: 600; margin: 4px 0; }
+
+  /* Legend */
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text2); }
+  .legend-swatch {
+    width: 14px; height: 10px; border-radius: 2px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 7px; font-weight: 700; border: 0.5px solid rgba(0,0,0,.15);
+  }
+  .rules-text { font-size: 10px; color: var(--text2); line-height: 1.8; }
+  .rules-text span { color: #b8860b; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<!-- SETUP SCREEN -->
+<div class="screen active" id="setupScreen">
+  <div class="setup-wrap">
+    <div class="setup-header">
+      <h1>Grid Golf</h1>
+      <p>Roll, move, and sink the ball in as few strokes as possible</p>
+    </div>
+    <div class="card">
+      <div class="card-title">Round setup</div>
+      <div class="form-row">
+        <label>Players</label>
+        <select id="numPlayers">
+          <option value="1">1 player</option>
+          <option value="2" selected>2 players</option>
+          <option value="3">3 players</option>
+          <option value="4">4 players</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Course style</label>
+        <select id="styleS">
+          <option value="links">Links</option>
+          <option value="parkland" selected>Parkland</option>
+          <option value="desert">Desert</option>
+          <option value="coastal">Coastal</option>
+        </select>
+      </div>
+      <div class="name-inputs" id="nameInputs"></div>
+      <button class="btn-full btn-primary" id="btnStart">Start round</button>
+    </div>
+    <div class="card" style="margin-top:10px">
+      <div class="card-title">How to play</div>
+      <div class="rules-text">
+        Move your ball from the Tee (TE) to the Hole (H) in as few strokes as possible.<br>
+        <b>Roll</b> the die, then click a <span>highlighted</span> cell to move.<br>
+        <b>Fairway/Tee:</b> +1 to roll &nbsp;·&nbsp; <b>Bunker:</b> −1 to roll<br>
+        <b>Trees &amp; Water:</b> fly over only — cannot land on them<br>
+        <b>From fairway</b> only: path may cross trees<br>
+        <b>Slope:</b> ball slides 1 square in arrow direction after landing<br>
+        <b>Putt:</b> move 1 square any time, even after rolling<br>
+        <b>Mulligan:</b> re-roll the die — 6 shared per round<br>
+        Par is <b>6</b> per hole · 18 holes · lowest total score wins
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- GAME SCREEN -->
+<div class="screen" id="gameScreen">
+  <div class="game-top">
+    <div>
+      <div class="game-title" id="cName"></div>
+      <div class="game-sub" id="cSub"></div>
+    </div>
+    <button id="btnNewRound">&#8635; New round</button>
+  </div>
+  <div class="game-main">
+    <div class="grid-wrap">
+      <div class="grid-outer" id="gridOuter">
+        <canvas id="courseCanvas"></canvas>
+        <div id="grid"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <!-- Win card -->
+      <div class="card" id="winCard" style="display:none">
+        <div class="win-banner" id="winBanner">
+          <div style="font-size:13px;font-weight:600">Round complete!</div>
+          <div class="win-score" id="winScore"></div>
+          <div style="font-size:11px;opacity:.8" id="winNote"></div>
+        </div>
+        <div class="btn-row" style="margin-top:8px">
+          <button class="btn-primary btn-full" id="btnNewRound2">New round</button>
+        </div>
+      </div>
+      <!-- Play card -->
+      <div class="card" id="playCard">
+        <div class="player-tabs" id="playerTabs"></div>
+        <div class="card-title">Hole <span id="holeNum">1</span> of 18 — <span id="turnLabel"></span>'s turn</div>
+        <div class="die-display" id="dieDisplay">—</div>
+        <div class="die-mod" id="dieMod"></div>
+        <div class="status-msg" id="statusMsg">Roll to start</div>
+        <div class="btn-row">
+          <button class="btn-primary" id="btnRoll">Roll</button>
+          <button class="btn-warn" id="btnMulligan">Mulligan (<span id="mulLeft">6</span>)</button>
+          <button id="btnPutt">Putt</button>
+        </div>
+      </div>
+      <!-- Stats -->
+      <div class="card">
+        <div class="card-title">Status</div>
+        <div class="stat-row"><span class="stat-label">Strokes this hole</span><span class="stat-val" id="statStrokes">0</span></div>
+        <div class="stat-row"><span class="stat-label">Terrain</span><span class="stat-val" id="statTerrain">—</span></div>
+        <div class="stat-row"><span class="stat-label">Mulligans left</span><span class="stat-val" id="statMul">6</span></div>
+        <div class="stat-row"><span class="stat-label">Round score</span><span class="stat-val" id="statRound">E</span></div>
+      </div>
+      <!-- Scorecards -->
+      <div class="card"><div class="card-title">Scorecard — front 9</div><table class="sc-table" id="scFront"></table></div>
+      <div class="card"><div class="card-title">Scorecard — back 9</div><table class="sc-table" id="scBack"></table></div>
+      <!-- Log -->
+      <div class="card"><div class="card-title">Shot log</div><div class="log" id="log"></div></div>
+      <!-- Rules -->
+      <div class="card">
+        <div class="card-title">Rules</div>
+        <div class="rules-text">
+          Roll · click <span>yellow</span> cell to move<br>
+          Fairway/Tee +1 · Bunker −1<br>
+          Trees &amp; water: fly over, cannot land<br>
+          From fairway only: may cross trees<br>
+          Slope: ball slides 1 sq after landing<br>
+          Hole: must land exact distance<br>
+          Putt: 1 sq anytime (even after rolling)<br>
+          Mulligan: re-roll · 6 per round (shared)
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch cell-TE">TE</div>Tee</div>
+    <div class="legend-item"><div class="legend-swatch cell-H" style="border-radius:50%;border:1.5px solid #222;font-size:6px">H</div>Hole</div>
+    <div class="legend-item"><div class="legend-swatch cell-F">F</div>Fairway</div>
+    <div class="legend-item"><div class="legend-swatch cell-R">R</div>Rough</div>
+    <div class="legend-item"><div class="legend-swatch cell-S">&#8599;</div>Slope</div>
+    <div class="legend-item"><div class="legend-swatch cell-B">B</div>Bunker</div>
+    <div class="legend-item"><div class="legend-swatch cell-T">T</div>Trees</div>
+    <div class="legend-item"><div class="legend-swatch cell-W">W</div>Water</div>
+  </div>
+</div>
+
+<script>
+'use strict';
+const COLS=16,ROWS=26,PAR=6,TOTAL_HOLES=18,MULLIGANS=6,CW=32,CH=21;
+const ARROWS=['↑','↗','→','↘','↓','↙','←','↖'];
+const SLOPE_DIRS=[{r:-1,c:0},{r:-1,c:1},{r:0,c:1},{r:1,c:1},{r:1,c:0},{r:1,c:-1},{r:0,c:-1},{r:-1,c:-1}];
+const ALL_DIRS=SLOPE_DIRS;
+const PLAYER_COLORS=[
+  {name:'Red',  hex:'#e53935',bg:'rgba(229,57,53,0.09)', light:'rgba(229,57,53,0.18)', text:'#b71c1c'},
+  {name:'Blue', hex:'#1e88e5',bg:'rgba(30,136,229,0.09)',light:'rgba(30,136,229,0.18)',text:'#0d47a1'},
+  {name:'Green',hex:'#43a047',bg:'rgba(67,160,71,0.09)', light:'rgba(67,160,71,0.18)', text:'#1b5e20'},
+  {name:'Gold', hex:'#f9a825',bg:'rgba(249,168,37,0.09)',light:'rgba(249,168,37,0.18)',text:'#f57f17'},
+];
+const CNAMES=[
+  ['Pebble','Cypress','Pinehurst','Augusta','Torrey','Harbour','Meadow','Willow','Ridgewood','Ironwood'],
+  ['Creek','Ridge','Pines','Glen','Links','Bluff','Cove','Flats','Hollow','Moor'],
+  ['Golf Club','Country Club','National','Reserve']
+];
+const HNAMES=['The Gauntlet','The Dogleg','The Island','The Valley','The Beast','The Punchbowl','The Switchback','The Narrows','The Elbow','The Cauldron','The Ravine','The Cliff','The Meadow','The Gorge','The Summit','Signature','The Cape','The Canyon'];
+
+function rngF(seed){let s=seed>>>0;return()=>{s=(1664525*s+1013904223)>>>0;return s/4294967296};}
+function inB(r,c){return r>=0&&r<ROWS&&c>=0&&c<COLS;}
+function lerp(a,b,t){return a+(b-a)*t;}
+function cc(r,c){return{x:c*CW+CW/2,y:r*CH+CH/2};}
+
+function generateCourse(seed,style){
+  const rng=rngF(seed);
+  const grid=Array.from({length:ROWS},()=>new Array(COLS).fill('R'));
+  const teeRow=ROWS-3, teeCol=2+Math.floor(rng()*4);
+  const holeRow=2,     holeCol=COLS-3-Math.floor(rng()*4);
+  const slopeData={};
+
+  function stamp(r,c,rad,type,ow){
+    for(let dr=-rad;dr<=rad;dr++)
+      for(let dc=-rad;dc<=rad;dc++)
+        if(inB(r+dr,c+dc)&&Math.abs(dr)+Math.abs(dc)<=rad+1&&ow.includes(grid[r+dr][c+dc]))
+          grid[r+dr][c+dc]=type;
+  }
+
+  const wps=[{r:teeRow,c:teeCol}];
+  const nwp=2+Math.floor(rng()*3);
+  for(let i=0;i<nwp;i++){
+    const f=(i+1)/(nwp+1);
+    const br=Math.round(lerp(teeRow,holeRow,f)), bc=Math.round(lerp(teeCol,holeCol,f));
+    const sw=(i%2===0?1:-1)*(2+Math.floor(rng()*4));
+    wps.push({r:Math.max(3,Math.min(ROWS-4,br+Math.floor((rng()-.5)*3))),c:Math.max(1,Math.min(COLS-2,bc+sw))});
+  }
+  wps.push({r:holeRow,c:holeCol});
+
+  for(let i=0;i<wps.length-1;i++){
+    const a=wps[i],b=wps[i+1];
+    const st=Math.max(Math.abs(b.r-a.r),Math.abs(b.c-a.c))*2;
+    const w=1+(rng()>.4?1:0);
+    for(let t=0;t<=st;t++){
+      const f=st===0?0:t/st;
+      stamp(Math.round(lerp(a.r,b.r,f)),Math.round(lerp(a.c,b.c,f)),w,'F',['R']);
+    }
+  }
+  for(let p=0;p<3+Math.floor(rng()*3);p++){
+    const f=.2+rng()*.6;
+    const r=Math.round(lerp(teeRow,holeRow,f)), c=Math.round(lerp(teeCol,holeCol,f))+Math.floor((rng()-.5)*4);
+    if(inB(r,c)) stamp(r,c,1+Math.floor(rng()*2),'R',['F']);
+  }
+  for(let p=0;p<2+Math.floor(rng()*2);p++){
+    const f=.25+rng()*.5;
+    const r=Math.round(lerp(teeRow,holeRow,f)), c=Math.round(lerp(teeCol,holeCol,f))+Math.floor((rng()-.5)*3);
+    if(inB(r,c)) stamp(r,c,1+Math.floor(rng()),'T',['R','F']);
+  }
+  const wc=style==='coastal'?4:style==='links'?1:style==='desert'?1:2;
+  for(let w=0;w<wc;w++){
+    let a=0;
+    while(a<40){a++;const wr=2+Math.floor(rng()*(ROWS-4)),wcc=1+Math.floor(rng()*(COLS-2));if(grid[wr][wcc]==='R'){stamp(wr,wcc,1+Math.floor(rng()*2),'W',['R']);break;}}
+  }
+  const tc=style==='parkland'?7:style==='desert'?3:style==='links'?2:5;
+  for(let t=0;t<tc;t++){
+    let a=0;
+    while(a<40){a++;const tr=1+Math.floor(rng()*(ROWS-2)),tcc=Math.floor(rng()*2)===0?Math.floor(rng()*3):COLS-1-Math.floor(rng()*3);if(inB(tr,tcc)&&grid[tr][tcc]==='R'){stamp(tr,tcc,1+Math.floor(rng()*2),'T',['R']);break;}}
+  }
+  for(let b=0;b<2+Math.floor(rng()*4);b++){
+    let a=0;
+    while(a<50){a++;const wp=wps[1+Math.floor(rng()*(wps.length-2))];const br=wp.r+Math.floor((rng()-.5)*8),bcc=wp.c+Math.floor((rng()-.5)*8);if(inB(br,bcc)&&grid[br][bcc]==='F'){grid[br][bcc]='B';if(rng()>.5&&inB(br,bcc+1)&&grid[br][bcc+1]==='F')grid[br][bcc+1]='B';break;}}
+  }
+  for(let s=0;s<3+Math.floor(rng()*4);s++){
+    let a=0;
+    while(a<40){a++;const sr=3+Math.floor(rng()*(ROWS-6)),scc=2+Math.floor(rng()*(COLS-4));if(grid[sr][scc]==='F'){const dir=Math.floor(rng()*8),sz=1+Math.floor(rng()*2);for(let dr=-sz;dr<=sz;dr++)for(let dc=-sz;dc<=sz;dc++){if(inB(sr+dr,scc+dc)&&grid[sr+dr][scc+dc]==='F'&&Math.abs(dr)+Math.abs(dc)<=sz){grid[sr+dr][scc+dc]='S';slopeData[`${sr+dr},${scc+dc}`]=dir;}}break;}}
+  }
+
+  grid[teeRow][teeCol]='TE';
+  grid[holeRow][holeCol]='H';
+  return{grid,slopeData,teeRow,teeCol,holeRow,holeCol,yards:280+Math.floor(rng()*200)};
+}
+
+/* ── Game state ── */
+let courses=[],courseName='',holeIndex=0,numPlayers=2;
+let players=[],currentPlayer=0,mulligansLeft=MULLIGANS;
+let rolled=false,effectiveDist=0,puttMode=false,validMoves=[],holeFinished=[],pendingDest=null;
+
+function tLabel(t){return{F:'Fairway',R:'Rough',B:'Bunker',S:'Slope',T:'Trees',W:'Water',H:'Hole',TE:'Tee'}[t]||t;}
+function getMod(t){return(t==='F'||t==='TE')?1:t==='B'?-1:0;}
+function canCrossT(pi){const t=courses[holeIndex].grid[players[pi].ball.r][players[pi].ball.c];return t==='F'||t==='TE';}
+
+function pathOK(fr,fc,tr,tc,dist,pi){
+  const dr=Math.sign(tr-fr),dc=Math.sign(tc-fc);
+  for(let s=1;s<dist;s++){
+    const mr=fr+dr*s,mc=fc+dc*s;
+    if(!inB(mr,mc))return false;
+    const t=courses[holeIndex].grid[mr][mc];
+    if(t==='T'&&!canCrossT(pi))return false;
+  }
+  return true;
+}
+
+function computeMoves(dist,pi){
+  const moves=[],b=players[pi].ball;
+  for(const d of ALL_DIRS){
+    const tr=b.r+d.r*dist,tc=b.c+d.c*dist;
+    if(!inB(tr,tc))continue;
+    const dest=courses[holeIndex].grid[tr][tc];
+    if(dest==='W'||dest==='T')continue;
+    if(!pathOK(b.r,b.c,tr,tc,dist,pi))continue;
+    moves.push({r:tr,c:tc});
+  }
+  return moves;
+}
+
+function computePutt(pi){
+  const moves=[],b=players[pi].ball;
+  for(const d of ALL_DIRS){
+    const r=b.r+d.r,c=b.c+d.c;
+    if(!inB(r,c))continue;
+    const t=courses[holeIndex].grid[r][c];
+    if(t==='W'||t==='T')continue;
+    moves.push({r,c});
+  }
+  return moves;
+}
+
+function applySlope(pi,r,c){
+  const course=courses[holeIndex],key=`${r},${c}`;
+  if(course.grid[r][c]==='S'&&course.slopeData[key]!==undefined){
+    const dir=course.slopeData[key],d=SLOPE_DIRS[dir],nr=r+d.r,nc=c+d.c;
+    if(inB(nr,nc)&&course.grid[nr][nc]!=='W'&&course.grid[nr][nc]!=='T'){
+      addLog(`Slope! ${players[pi].name} slides ${['N','NE','E','SE','S','SW','W','NW'][dir]}`);
+      return{r:nr,c:nc,slid:true};
+    }
+  }
+  return{r,c,slid:false};
+}
+
+function addLog(msg,key=false){
+  const el=document.getElementById('log'),d=document.createElement('div');
+  d.className='log-entry'+(key?' key':'');
+  d.textContent=msg;
+  el.appendChild(d);
+  el.scrollTop=el.scrollHeight;
+}
+
+function drawCanvas(){
+  const canvas=document.getElementById('courseCanvas');
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  players.forEach((p,pi)=>{
+    const col=PLAYER_COLORS[pi];
+    if(p.trail&&p.trail.length>=2){
+      for(let i=0;i<p.trail.length-1;i++){
+        const from=cc(p.trail[i].r,p.trail[i].c),to=cc(p.trail[i+1].r,p.trail[i+1].c);
+        ctx.beginPath();ctx.moveTo(from.x,from.y);ctx.lineTo(to.x,to.y);
+        ctx.strokeStyle=col.hex+'99';ctx.lineWidth=1.8;ctx.setLineDash([4,3]);ctx.stroke();ctx.setLineDash([]);
+      }
+      for(let i=1;i<p.trail.length-1;i++){
+        const pos=cc(p.trail[i].r,p.trail[i].c);
+        ctx.beginPath();ctx.arc(pos.x,pos.y,4,0,Math.PI*2);
+        ctx.fillStyle=col.hex+'55';ctx.fill();
+        ctx.strokeStyle=col.hex+'cc';ctx.lineWidth=1.2;ctx.stroke();
+      }
+    }
+  });
+
+  if(pendingDest){
+    const p=players[currentPlayer],col=PLAYER_COLORS[currentPlayer];
+    const from=cc(p.ball.r,p.ball.c),to=cc(pendingDest.r,pendingDest.c);
+    ctx.beginPath();ctx.moveTo(from.x,from.y);ctx.lineTo(to.x,to.y);
+    ctx.strokeStyle=col.hex;ctx.lineWidth=2;ctx.setLineDash([]);ctx.stroke();
+    ctx.beginPath();ctx.arc(to.x,to.y,8,0,Math.PI*2);
+    ctx.fillStyle=col.hex+'33';ctx.fill();
+    ctx.strokeStyle=col.hex;ctx.lineWidth=2;ctx.stroke();
+  }
+
+  players.forEach((p,pi)=>{
+    const col=PLAYER_COLORS[pi],pos=cc(p.ball.r,p.ball.c);
+    ctx.beginPath();ctx.arc(pos.x,pos.y,6.5,0,Math.PI*2);
+    ctx.fillStyle=col.hex;ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+    ctx.fillStyle='#fff';ctx.font='bold 7px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(p.name[0].toUpperCase(),pos.x,pos.y);
+  });
+}
+
+function holeClass(s){
+  if(s===null)return'';
+  const d=s-PAR;
+  if(d<=-2)return'sc-eagle';if(d===-1)return'sc-birdie';if(d===0)return'sc-par';if(d===1)return'sc-bogey';return'sc-dbogey';
+}
+
+function renderScorecard(){
+  ['Front','Back'].forEach((half,hi)=>{
+    const start=hi*9,end=start+9,tbl=document.getElementById('sc'+half);
+    let hdrH='<tr><th>Hole</th>',parH='<tr><td style="font-size:9px;color:var(--text2)">Par</td>';
+    const pRows=players.map(p=>`<tr><td style="font-weight:700;color:${PLAYER_COLORS[players.indexOf(p)].text}">${p.name[0]}</td>`);
+    let parTot=0;
+    for(let i=start;i<end;i++){
+      hdrH+=`<th>${i+1}</th>`;parH+=`<td>${PAR}</td>`;parTot+=PAR;
+      players.forEach((p,pi)=>{
+        const isCur=i===holeIndex&&currentPlayer===pi&&!holeFinished[pi];
+        const s=p.scores[i],cls=holeClass(s)+(s!==null?' sc-done':'');
+        pRows[pi]+=`<td class="${cls}" style="${isCur?`font-weight:700;color:${PLAYER_COLORS[pi].hex}`:''}">${s!==null?s:(isCur?'…':'—')}</td>`;
+      });
+    }
+    hdrH+=`<th>Tot</th></tr>`;parH+=`<td>${parTot}</td></tr>`;
+    players.forEach((p,pi)=>{
+      const h=p.scores.slice(start,end).filter(s=>s!==null);
+      pRows[pi]+=`<td class="sc-total" style="color:${PLAYER_COLORS[pi].text}">${h.length?h.reduce((a,b)=>a+b,0):'—'}</td></tr>`;
+    });
+    tbl.innerHTML=hdrH+parH+pRows.join('');
+  });
+}
+
+function renderPlayerTabs(){
+  const tabs=document.getElementById('playerTabs');tabs.innerHTML='';
+  players.forEach((p,pi)=>{
+    const col=PLAYER_COLORS[pi],div=document.createElement('div');
+    div.className='player-tab'+(pi===currentPlayer?' active':'');
+    div.style.background=pi===currentPlayer?col.light:col.bg;
+    div.style.color=col.text;
+    div.style.borderColor=pi===currentPlayer?col.hex:'transparent';
+    div.textContent=holeFinished[pi]?p.name+' ✓':p.name;
+    tabs.appendChild(div);
+  });
+}
+
+function renderGrid(){
+  const course=courses[holeIndex],el=document.getElementById('grid');
+  el.innerHTML='';
+  const vm=new Set(validMoves.map(m=>`${m.r},${m.c}`));
+  for(let r=0;r<ROWS;r++){
+    const row=document.createElement('div');row.className='grid-row';
+    for(let c=0;c<COLS;c++){
+      const t=course.grid[r][c],isValid=vm.has(`${r},${c}`);
+      const d=document.createElement('div');
+      d.className='cell cell-'+t+(isValid?' valid-move':'');
+      if(t==='S'){const dir=course.slopeData[`${r},${c}`]??0;d.textContent=ARROWS[dir];d.title='Slope';}
+      else{d.textContent=t;}
+      if(isValid){
+        d.onmouseenter=()=>{pendingDest={r,c};drawCanvas();};
+        d.onmouseleave=()=>{pendingDest=null;drawCanvas();};
+        d.onclick=()=>doMove(r,c);
+      }
+      row.appendChild(d);
+    }
+    el.appendChild(row);
+  }
+  const canvas=document.getElementById('courseCanvas');
+  canvas.width=COLS*CW;canvas.height=ROWS*CH;
+  canvas.style.width=COLS*CW+'px';canvas.style.height=ROWS*CH+'px';
+}
+
+function updateUI(){
+  const p=players[currentPlayer],col=PLAYER_COLORS[currentPlayer];
+  const t=courses[holeIndex].grid[p.ball.r][p.ball.c];
+  document.getElementById('holeNum').textContent=holeIndex+1;
+  document.getElementById('turnLabel').textContent=p.name;
+  document.getElementById('turnLabel').style.color=col.hex;
+  document.getElementById('statStrokes').textContent=p.scores[holeIndex]??0;
+  document.getElementById('statTerrain').textContent=tLabel(t);
+  document.getElementById('statMul').textContent=mulligansLeft;
+  document.getElementById('mulLeft').textContent=mulligansLeft;
+  const done=p.scores.filter(s=>s!==null);
+  const tot=done.length?done.reduce((a,b)=>a+b,0):0;
+  const diff=tot-PAR*done.length;
+  document.getElementById('statRound').textContent=done.length?(diff===0?'E':(diff>0?'+':'')+diff):'E';
+  const hc=holeFinished[currentPlayer];
+  document.getElementById('btnRoll').disabled=hc||(rolled&&!puttMode);
+  document.getElementById('btnMulligan').disabled=mulligansLeft===0||!rolled||puttMode||hc;
+  document.getElementById('btnPutt').disabled=hc;
+  const pc=document.getElementById('playCard');
+  pc.style.background=col.bg;pc.style.borderColor=col.hex+'55';
+  renderPlayerTabs();renderScorecard();renderGrid();drawCanvas();
+}
+
+function rollD6(){return 1+Math.floor(Math.random()*6);}
+function diceFace(n){return['','⚀','⚁','⚂','⚃','⚄','⚅'][n]||String(n);}
+
+function doRoll(){
+  const p=players[currentPlayer],t=courses[holeIndex].grid[p.ball.r][p.ball.c];
+  const raw=rollD6(),mod=getMod(t);
+  effectiveDist=Math.max(1,raw+mod);
+  rolled=true;puttMode=false;pendingDest=null;
+  validMoves=computeMoves(effectiveDist,currentPlayer);
+  const ms=mod>0?` +1→${effectiveDist}`:mod<0?` −1→${effectiveDist}`:`→${effectiveDist}`;
+  document.getElementById('dieDisplay').textContent=diceFace(raw);
+  document.getElementById('dieMod').textContent=`${p.name}: ${raw}${ms} sq · ${validMoves.length} moves`;
+  document.getElementById('statusMsg').textContent=validMoves.length?'Click yellow to move':'No valid moves — putt or mulligan';
+  addLog(`${p.name} rolls ${raw}${ms} sq`);
+  updateUI();
+}
+
+function doMulligan(){
+  if(mulligansLeft<=0||!rolled||puttMode)return;
+  mulligansLeft--;
+  addLog(`${players[currentPlayer].name} uses mulligan (${mulligansLeft} left)`);
+  rolled=false;validMoves=[];pendingDest=null;
+  document.getElementById('dieDisplay').textContent='—';
+  document.getElementById('dieMod').textContent='';
+  updateUI();doRoll();
+}
+
+function doPutt(){
+  if(holeFinished[currentPlayer])return;
+  rolled=false;puttMode=true;pendingDest=null;
+  validMoves=computePutt(currentPlayer);
+  document.getElementById('dieDisplay').textContent='↔';
+  document.getElementById('dieMod').textContent='Putt — 1 square';
+  document.getElementById('statusMsg').textContent='Click adjacent cell';
+  updateUI();
+}
+
+function doMove(r,c){
+  if(!validMoves.some(m=>m.r===r&&m.c===c))return;
+  const p=players[currentPlayer],isPutt=puttMode;
+  p.scores[holeIndex]=(p.scores[holeIndex]??0)+1;
+  rolled=false;puttMode=false;validMoves=[];pendingDest=null;
+  p.ball={r,c};
+  const res=applySlope(currentPlayer,r,c);
+  if(res.slid)p.ball={r:res.r,c:res.c};
+  p.trail.push({...p.ball});
+  const t=courses[holeIndex].grid[p.ball.r][p.ball.c];
+  addLog(`${p.name} stroke ${p.scores[holeIndex]}: →(${p.ball.c},${p.ball.r}) ${tLabel(t)}${isPutt?' [putt]':''}`);
+  document.getElementById('dieDisplay').textContent='—';
+  document.getElementById('dieMod').textContent='';
+  if(t==='H'){
+    holeFinished[currentPlayer]=true;
+    const s=p.scores[holeIndex],diff=s-PAR;
+    const label=diff<=-2?'Eagle!':diff===-1?'Birdie!':diff===0?'Par':diff===1?'Bogey':`+${diff}`;
+    document.getElementById('statusMsg').textContent=`${p.name}: ${label}!`;
+    addLog(`${p.name}: ${label} — ${s} strokes`,true);
+    if(holeFinished.every(f=>f)){
+      if(holeIndex<TOTAL_HOLES-1){setTimeout(()=>nextHole(),1400);}
+      else{setTimeout(()=>showRoundComplete(),800);}
+      updateUI();return;
+    }
+  }else{
+    document.getElementById('statusMsg').textContent='Roll for next shot';
+  }
+  if(!holeFinished.every(f=>f))advancePlayer();
+  updateUI();
+}
+
+function advancePlayer(){
+  let next=(currentPlayer+1)%numPlayers,tries=0;
+  while(holeFinished[next]&&tries<numPlayers){next=(next+1)%numPlayers;tries++;}
+  currentPlayer=next;rolled=false;puttMode=false;validMoves=[];pendingDest=null;
+  document.getElementById('dieDisplay').textContent='—';
+  document.getElementById('dieMod').textContent='';
+  document.getElementById('statusMsg').textContent=`${players[currentPlayer].name}'s turn — roll!`;
+}
+
+function nextHole(){
+  holeIndex++;holeFinished=new Array(numPlayers).fill(false);currentPlayer=0;
+  rolled=false;puttMode=false;validMoves=[];pendingDest=null;
+  players.forEach(p=>{
+    p.ball={r:courses[holeIndex].teeRow,c:courses[holeIndex].teeCol};
+    p.trail=[{r:courses[holeIndex].teeRow,c:courses[holeIndex].teeCol}];
+    p.scores[holeIndex]=0;
+  });
+  document.getElementById('log').innerHTML='';
+  document.getElementById('dieDisplay').textContent='—';
+  document.getElementById('dieMod').textContent='';
+  document.getElementById('statusMsg').textContent='Roll to start';
+  const h=courses[holeIndex];
+  document.getElementById('cSub').textContent=`Hole ${holeIndex+1} · ${HNAMES[holeIndex]} · Par ${PAR} · ${h.yards} yds`;
+  addLog(`Hole ${holeIndex+1} — ${HNAMES[holeIndex]} (${h.yards} yds)`);
+  updateUI();
+}
+
+function showRoundComplete(){
+  document.getElementById('winCard').style.display='block';
+  document.getElementById('playCard').style.display='none';
+  const totals=players.map(p=>p.scores.reduce((a,b)=>a+(b||0),0));
+  const min=Math.min(...totals),winners=players.filter((_,i)=>totals[i]===min),wpi=players.indexOf(winners[0]);
+  const col=PLAYER_COLORS[wpi],banner=document.getElementById('winBanner');
+  banner.style.background=col.light;banner.style.border=`1px solid ${col.hex}66`;banner.style.color=col.text;
+  document.getElementById('winScore').textContent=winners.length>1?`Tie: ${winners.map(w=>w.name).join(' & ')}`:winners[0].name+' wins!';
+  document.getElementById('winNote').textContent=players.map((p,pi)=>{const d=totals[pi]-PAR*TOTAL_HOLES;return`${p.name}: ${totals[pi]} (${d===0?'E':(d>0?'+':'')+d})`;}).join(' · ');
+  renderScorecard();
+}
+
+function buildNameInputs(){
+  const n=parseInt(document.getElementById('numPlayers').value),wrap=document.getElementById('nameInputs');
+  wrap.innerHTML='';
+  for(let i=0;i<n;i++){
+    const col=PLAYER_COLORS[i],row=document.createElement('div');
+    row.className='name-row';
+    const dot=document.createElement('div');
+    dot.className='color-dot';dot.style.background=col.hex;
+    const inp=document.createElement('input');
+    inp.type='text';inp.id=`pname${i}`;inp.value=col.name;inp.placeholder=`Player ${i+1} name`;
+    row.appendChild(dot);row.appendChild(inp);wrap.appendChild(row);
+  }
+}
+
+function startRound(){
+  numPlayers=parseInt(document.getElementById('numPlayers').value);
+  const style=document.getElementById('styleS').value;
+  const rng=rngF(Math.floor(Math.random()*999999));
+  courseName=`${CNAMES[0][Math.floor(rng()*10)]} ${CNAMES[1][Math.floor(rng()*10)]} ${CNAMES[2][Math.floor(rng()*4)]}`;
+  const seed=Math.floor(Math.random()*999999);
+  courses=[];
+  for(let i=0;i<TOTAL_HOLES;i++)courses.push(generateCourse(seed+i*7919,style));
+  players=[];
+  for(let i=0;i<numPlayers;i++){
+    const nameEl=document.getElementById(`pname${i}`);
+    players.push({
+      name:nameEl&&nameEl.value.trim()?nameEl.value.trim():PLAYER_COLORS[i].name,
+      ball:{r:courses[0].teeRow,c:courses[0].teeCol},
+      trail:[{r:courses[0].teeRow,c:courses[0].teeCol}],
+      scores:new Array(TOTAL_HOLES).fill(null)
+    });
+    players[i].scores[0]=0;
+  }
+  holeIndex=0;currentPlayer=0;mulligansLeft=MULLIGANS;
+  holeFinished=new Array(numPlayers).fill(false);
+  rolled=false;puttMode=false;validMoves=[];pendingDest=null;
+  document.getElementById('setupScreen').classList.remove('active');
+  document.getElementById('gameScreen').classList.add('active');
+  document.getElementById('cName').textContent=courseName;
+  document.getElementById('cSub').textContent=`Hole 1 · ${HNAMES[0]} · Par ${PAR} · ${courses[0].yards} yds`;
+  document.getElementById('log').innerHTML='';
+  document.getElementById('winCard').style.display='none';
+  document.getElementById('playCard').style.display='block';
+  addLog(`Welcome to ${courseName}! ${numPlayers} player${numPlayers>1?'s':''} · ${MULLIGANS} mulligans`);
+  updateUI();
+}
+
+function goToSetup(){
+  document.getElementById('gameScreen').classList.remove('active');
+  document.getElementById('setupScreen').classList.add('active');
+  buildNameInputs();
+}
+
+document.getElementById('numPlayers').onchange=buildNameInputs;
+document.getElementById('btnStart').onclick=startRound;
+document.getElementById('btnRoll').onclick=doRoll;
+document.getElementById('btnMulligan').onclick=doMulligan;
+document.getElementById('btnPutt').onclick=doPutt;
+document.getElementById('btnNewRound').onclick=goToSetup;
+document.getElementById('btnNewRound2').onclick=goToSetup;
+
+buildNameInputs();
+</script>
+</body>
+</html>
