@@ -38,7 +38,9 @@ class HoleData:
     tee:        tuple[int, int]                  # (col, row)
     pin:        tuple[int, int]                  # (col, row)
     waypoints:  list[tuple[float, float]]        = field(default_factory=list)
-    slope_dirs: dict[tuple[int, int], str]       = field(default_factory=dict)
+    slope_dirs:  dict[tuple[int, int], str]       = field(default_factory=dict)
+    wind_speed:  int                              = 0   # 0–3
+    wind_dir:    str                              = ""  # one of ↑↗→↘↓↙←↖, empty when calm
 
 
 @dataclass

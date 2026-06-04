@@ -15,6 +15,7 @@ _FG: dict[Terrain, str] = {
 }
 
 _FAIRWAY_BG = TERRAIN_PROPS[Terrain.FAIRWAY].bg
+_WHITE_BG   = "\033[107m"
 
 
 def _block(bg: str, fg: str, ch: str) -> str:
@@ -49,9 +50,9 @@ def render_hole(hole: HoleData,
         row = "  |"
         for c in range(cols):
             if (c, r) == hole.pin:
-                row += _block(_FAIRWAY_BG, f"{_BOLD}\033[30m", "O")
+                row += _block(_WHITE_BG, f"{_BOLD}\033[30m", "O")
             elif (c, r) == hole.tee:
-                row += _block(_FAIRWAY_BG, f"{_BOLD}\033[30m", "T")
+                row += _block(_WHITE_BG, f"{_BOLD}\033[30m", "T")
             elif ball_pos == (c, r):
                 row += _block("\033[43m", f"{_BOLD}\033[30m", "@")
             else:
@@ -88,9 +89,8 @@ def _build_legend() -> list[str]:
         else:
             lines.append(f"  {swatch}  {t.value:<8}  {props.shot_factor:.0%}")
     lines += [
-        f"  {_FAIRWAY_BG}{_BOLD}\033[97mT {_RESET}  tee box",
-        f"  {_FAIRWAY_BG}{_BOLD}\033[97mO {_RESET}  pin",
-        f"  {'─'*24}",
+        f"  {_WHITE_BG}{_BOLD}\033[30mT {_RESET}  tee box",
+        f"  {_WHITE_BG}{_BOLD}\033[30mO {_RESET}  pin",
     ]
     return lines
 
@@ -98,10 +98,17 @@ def _build_legend() -> list[str]:
 _LEGEND_LINES = _build_legend()
 
 
+def _wind_lines(hole: HoleData) -> list[str]:
+    w = 24
+    sep   = f"  {'─'*w}"
+    label = "calm" if hole.wind_speed == 0 else f"{hole.wind_dir}  {'▪' * hole.wind_speed}"
+    return [sep, f"  Wind: {label}", sep, "  Mulligans: "]
+
+
 def render_hole_with_legend(hole: HoleData,
                             ball_pos: tuple[int, int] | None = None) -> str:
     hole_lines   = render_hole(hole, ball_pos).splitlines()
-    legend_lines = _LEGEND_LINES[:]
+    legend_lines = _LEGEND_LINES[:] + _wind_lines(hole)
 
     n = max(len(hole_lines), len(legend_lines))
     hole_lines   += [""] * (n - len(hole_lines))

@@ -234,10 +234,15 @@ def generate_hole(number: int, seed: int) -> HoleData:
     _stamp_fairway(grid, pin_c, pin_r, 2)   # 5×5 green
     _stamp_fairway(grid, tee_c, tee_r, 1)   # 3×3 tee box
 
+    # Wind: weighted toward calmer speeds (0→30 %, 1→40 %, 2→20 %, 3→10 %).
+    wind_speed = rng.choices([0, 1, 2, 3], weights=[3, 4, 2, 1])[0]
+    wind_dir   = rng.choice(_SLOPE_ARROWS) if wind_speed > 0 else ""
+
     par = _PAR_LAYOUT[(number - 1) % 18]
     return HoleData(number=number, par=par, grid=grid,
                     tee=tee, pin=pin, waypoints=waypoints,
-                    slope_dirs=slope_dirs)
+                    slope_dirs=slope_dirs,
+                    wind_speed=wind_speed, wind_dir=wind_dir)
 
 
 def generate_course(name: str = "Procedural Pines", seed: int = 42) -> CourseData:
