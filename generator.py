@@ -144,6 +144,12 @@ def _place_water(grid: list[list[Terrain]],
 
 _SLOPE_ARROWS  = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖']
 
+# Slide direction for each arrow — mirrors ARROW_DIR in game.py.
+_ARROW_STEP = {
+    '↑': ( 0, -1), '↗': ( 1, -1), '→': ( 1,  0), '↘': ( 1,  1),
+    '↓': ( 0,  1), '↙': (-1,  1), '←': (-1,  0), '↖': (-1, -1),
+}
+
 
 def _place_slopes(grid: list[list[Terrain]],
                   rng: random.Random,
@@ -153,14 +159,32 @@ def _place_slopes(grid: list[list[Terrain]],
         sr    = rng.randint(0, HEIGHT - 1)
         rad   = rng.randint(1, 3)
         arrow = rng.choice(_SLOPE_ARROWS)   # whole patch faces one direction
+        step_c, step_r = _ARROW_STEP[arrow]
+
         for dc in range(-rad, rad + 1):
             for dr in range(-rad, rad + 1):
                 if dc * dc + dr * dr <= rad * rad:
                     nc, nr = sc + dc, sr + dr
-                    if 0 <= nc < WIDTH and 0 <= nr < HEIGHT:
-                        if grid[nr][nc] in (Terrain.ROUGH, Terrain.TREES):
-                            grid[nr][nc] = Terrain.SLOPE
-                            slope_dirs[(nc, nr)] = arrow
+                    if not (0 <= nc < WIDTH and 0 <= nr < HEIGHT):
+                        continue
+                    if grid[nr][nc] not in (Terrain.ROUGH, Terrain.TREES):
+                        continue
+                    # Only place if the slide destination is in-bounds and not trees.
+                    dest_c, dest_r = nc + step_c, nr + step_r
+                    if not (0 <= dest_c < WIDTH and 0 <= dest_r < HEIGHT):
+                        continue
+                    if grid[dest_r][dest_c] == Terrain.TREES:
+                        continue
+                    # Prevent 2-cell cycles: skip if the destination is already a
+                    # slope that slides straight back to this cell.
+                    if grid[dest_r][dest_c] == Terrain.SLOPE:
+                        back = slope_dirs.get((dest_c, dest_r), '')
+                        if back:
+                            bsc, bsr = _ARROW_STEP[back]
+                            if (dest_c + bsc, dest_r + bsr) == (nc, nr):
+                                continue
+                    grid[nr][nc] = Terrain.SLOPE
+                    slope_dirs[(nc, nr)] = arrow
 
 
 # ── Tree obstacles (block the fairway corridor) ───────────────────────────────
@@ -225,16 +249,16 @@ def generate_hole(number: int, seed: int) -> HoleData:
 
     _place_bunkers(grid, waypoints, pin, rng)
     _place_water(grid, waypoints, rng)
-    _place_slopes(grid, rng, slope_dirs)
     _place_rough_band(grid, rng, seed)
     _place_tree_obstacles(grid, waypoints, rng)
+    _place_slopes(grid, rng, slope_dirs)      # after trees so destinations are final
 
     # Green and tee box stamped last so nothing overwrites them.
     _stamp_fairway(grid, pin_c, pin_r, 2)   # 5×5 green
     _stamp_fairway(grid, tee_c, tee_r, 1)   # 3×3 tee box
 
     # Wind: weighted toward calmer speeds (0→30 %, 1→40 %, 2→20 %, 3→10 %).
-    wind_speed = rng.choices([0, 1, 2, 3], weights=[3, 4, 2, 1])[0]
+    wind_speed = rng.choices([0, 1, 2, 3], weights=[3, 4, 2, 0.1])[0]
     wind_dir   = rng.choice(_SLOPE_ARROWS) if wind_speed > 0 else ""
 
     par = _PAR_LAYOUT[(number - 1) % 18]

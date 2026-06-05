@@ -11,7 +11,7 @@ from .game      import (HoleState, apply_shot, compute_shot, score_label,
 
 # ── Visual constants ───────────────────────────────────────────────────────────
 
-CELL = 24   # pixels per grid cell
+CELL = 24
 
 TERRAIN_BG: dict[Terrain, str] = {
     Terrain.FAIRWAY: "#5FFF00",
@@ -23,38 +23,100 @@ TERRAIN_BG: dict[Terrain, str] = {
 }
 
 _DARK   = "#1a1a1a"
-_MID    = "#2d2d2d"
 _WHITE  = "#FFFFFF"
 _YELLOW = "#FFD700"
 _DIM    = "#555555"
 
-# Score colour by diff from par
+
 def _score_color(strokes: int, par: int) -> str:
     d = strokes - par
-    if   d <= -2: return "#FFD700"   # eagle or better – gold
-    elif d == -1: return "#44FF88"   # birdie – green
-    elif d ==  0: return _WHITE      # par – white
-    elif d ==  1: return "#FFAA00"   # bogey – amber
-    else:         return "#FF4444"   # double bogey+ – red
+    if   d <= -2: return _YELLOW    # eagle or better
+    elif d == -1: return "#44FF88"  # birdie
+    elif d ==  0: return _WHITE     # par
+    elif d ==  1: return "#FFAA00"  # bogey
+    else:         return "#FF4444"  # double bogey+
 
 
-# ── Application ────────────────────────────────────────────────────────────────
+# ── Start / New-Course dialog ──────────────────────────────────────────────────
+
+def _show_start_dialog(root: tk.Tk,
+                       default_seed: int = 42) -> tuple[int, int] | None:
+    """
+    Show a modal dialog for seed entry and course-length selection.
+    Returns (seed, holes_to_play) or None if the window is closed.
+    """
+    result: list[tuple[int, int] | None] = [None]
+
+    dlg = tk.Toplevel(root)
+    dlg.title("Grid Golf")
+    dlg.configure(bg=_DARK)
+    dlg.resizable(False, False)
+    dlg.grab_set()   # modal
+
+    # Centre on the screen.
+    dlg.update_idletasks()
+    dw, dh = 320, 220
+    sw = dlg.winfo_screenwidth()
+    sh = dlg.winfo_screenheight()
+    dlg.geometry(f"{dw}x{dh}+{(sw - dw) // 2}+{(sh - dh) // 2}")
+
+    tk.Label(dlg, text="Grid Golf", bg=_DARK, fg=_YELLOW,
+             font=("Consolas", 20, "bold")).pack(pady=(20, 8))
+
+    # Seed row
+    seed_row = tk.Frame(dlg, bg=_DARK)
+    seed_row.pack(pady=6)
+    tk.Label(seed_row, text="Seed:", bg=_DARK, fg=_WHITE,
+             font=("Consolas", 11)).pack(side="left", padx=(0, 8))
+    seed_var = tk.StringVar(value=str(default_seed))
+    tk.Entry(seed_row, textvariable=seed_var, width=8,
+             bg="#333333", fg=_WHITE, insertbackground=_WHITE,
+             font=("Consolas", 13), relief="flat", bd=4).pack(side="left")
+
+    # Course-length buttons
+    btn_row = tk.Frame(dlg, bg=_DARK)
+    btn_row.pack(pady=14)
+
+    def _start(holes: int) -> None:
+        try:
+            seed = int(seed_var.get())
+        except ValueError:
+            seed = 42
+        result[0] = (seed, holes)
+        dlg.destroy()
+
+    BTN = dict(width=11, height=2, font=("Consolas", 11, "bold"),
+               relief="raised", bd=3, activebackground="#666666")
+    tk.Button(btn_row, text="Front 9",    bg="#444444", fg=_WHITE,
+              command=lambda: _start(9),  **BTN).pack(side="left", padx=8)
+    tk.Button(btn_row, text="Full Course", bg="#444444", fg=_WHITE,
+              command=lambda: _start(18), **BTN).pack(side="left", padx=8)
+
+    dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
+    root.wait_window(dlg)
+    return result[0]
+
+
+# ── Main application ───────────────────────────────────────────────────────────
 
 class GolfApp:
 
-    def __init__(self, root: tk.Tk, course: CourseData) -> None:
-        self.root      = root
-        self.course    = course
-        self.hole_idx  = 0
-        self.mulligans = MULLIGANS_PER_COURSE
+    def __init__(self, root: tk.Tk, course: CourseData,
+                 holes_to_play: int = 18, seed: int = 42) -> None:
+        self.root          = root
+        self.course        = course
+        self.holes_to_play = holes_to_play   # 9 or 18
+        self.seed          = seed
+        self.mulligans     = MULLIGANS_PER_COURSE
         self.scores: list[int] = []
 
         # Turn state
         self.state: HoleState | None = None
-        self.roll        = (1, 1)
-        self.chosen      = None   # "d1" | "d2" | "p"
-        self.choosing    = False
-        self.first_roll  = True
+        self.hole_idx  = 0
+        self.roll      = (1, 1)
+        self.chosen    = None
+        self.choosing  = False
+        self.first_roll = True
         self.valid_moves:   dict[tuple[int, int], str] = {}
         self.penalty_moves: set[tuple[int, int]]       = set()
 
@@ -91,6 +153,12 @@ class GolfApp:
         def sep():
             tk.Frame(ctrl, bg="#444444", height=1).pack(fill="x", pady=5)
 
+        # New Course button (top)
+        tk.Button(ctrl, text="New Course", command=self._new_game,
+                  bg="#334455", fg=_WHITE, activebackground="#446677",
+                  font=("Consolas", 9, "bold"), relief="raised",
+                  width=14).pack(anchor="e", pady=(0, 4))
+
         self.lbl_hole   = lbl(size=11, bold=True)
         self.lbl_hole.pack(anchor="w")
         self.lbl_stroke = lbl(fg="#AAAAAA")
@@ -103,18 +171,18 @@ class GolfApp:
         self.lbl_mull.pack(anchor="w", pady=(0, 2))
         sep()
 
-        # 2×2 action buttons — all same style/size
+        # 2×2 action buttons
         action = tk.Frame(ctrl, bg=_DARK)
         action.pack(pady=6)
         BTN = dict(width=6, height=2, font=("Consolas", 16, "bold"),
                    relief="raised", bd=3, activebackground="#555555")
 
-        self.btn_d1 = tk.Button(action, text="?", bg="#333333", fg=_WHITE,
-                                command=lambda: self._pick("d1"), **BTN)
+        self.btn_d1   = tk.Button(action, text="?", bg="#333333", fg=_WHITE,
+                                  command=lambda: self._pick("d1"), **BTN)
         self.btn_d1.grid(row=0, column=0, padx=5, pady=4)
 
-        self.btn_d2 = tk.Button(action, text="?", bg="#333333", fg=_WHITE,
-                                command=lambda: self._pick("d2"), **BTN)
+        self.btn_d2   = tk.Button(action, text="?", bg="#333333", fg=_WHITE,
+                                  command=lambda: self._pick("d2"), **BTN)
         self.btn_d2.grid(row=0, column=1, padx=5, pady=4)
 
         self.btn_putt = tk.Button(action, text="P", bg="#333333", fg=_WHITE,
@@ -127,7 +195,6 @@ class GolfApp:
 
         sep()
 
-        # Distance hint
         self.lbl_dist = lbl(fg=_YELLOW)
         self.lbl_dist.pack(anchor="w", pady=(0, 4))
 
@@ -148,127 +215,153 @@ class GolfApp:
 
         # ── Column 2: scorecard ───────────────────────────────────────────────
         self.root.grid_columnconfigure(2, minsize=145)
-        sc_frame = tk.Frame(self.root, bg=_DARK)
-        sc_frame.grid(row=0, column=2, padx=(4, 8), pady=8, sticky="n")
-        self._build_scorecard(sc_frame)
+        self.sc_frame = tk.Frame(self.root, bg=_DARK)
+        self.sc_frame.grid(row=0, column=2, padx=(4, 8), pady=8, sticky="n")
+        self._build_scorecard()
 
-    def _build_scorecard(self, parent: tk.Frame) -> None:
-        """Build the static scorecard table; store mutable score cells."""
-        BG, FG = _DARK, _WHITE
+    def _build_scorecard(self) -> None:
+        """Build (or rebuild) the scorecard table inside self.sc_frame."""
+        for w in self.sc_frame.winfo_children():
+            w.destroy()
+
+        parent = self.sc_frame
         HDR = ("Consolas", 9, "bold")
         ROW = ("Consolas", 9)
-        PAD = dict(padx=3, pady=1)
+        PAD = dict(padx=2, pady=1)
 
-        def hdr(text, r, c, span=1):
-            tk.Label(parent, text=text, bg="#333333", fg=_YELLOW,
-                     font=HDR, width=5, anchor="center").grid(
-                         row=r, column=c, columnspan=span,
-                         sticky="ew", padx=1, pady=1)
+        def cell(text, r, c, fg=_WHITE, bg=_DARK, font=ROW, w=5):
+            tk.Label(parent, text=text, bg=bg, fg=fg, font=font,
+                     width=w, anchor="center").grid(
+                         row=r, column=c, sticky="ew", **PAD)
 
-        def div(r, thick=False):
-            tk.Frame(parent,
-                     bg="#666666" if thick else "#444444",
+        def hdr(text, r, c):
+            cell(text, r, c, fg=_YELLOW, bg="#333333", font=HDR)
+
+        def divrow(r, thick=False):
+            tk.Frame(parent, bg="#666666" if thick else "#444444",
                      height=2 if thick else 1).grid(
                          row=r, column=0, columnspan=3,
-                         sticky="ew", pady=(2, 2))
+                         sticky="ew", pady=2)
 
         # Title
         tk.Label(parent, text="SCORECARD", bg=_DARK, fg=_YELLOW,
                  font=("Consolas", 9, "bold")).grid(
                      row=0, column=0, columnspan=3, pady=(0, 4))
 
-        # Column headers
-        hdr("#",     1, 0)
-        hdr("Par",   1, 1)
-        hdr("Score", 1, 2)
-        div(2)
+        hdr("#", 1, 0); hdr("Par", 1, 1); hdr("Score", 1, 2)
+        divrow(2)
 
         self.score_cells: dict[int, tk.Label] = {}
-        cur_row = 3
+        cur = 3
+        holes = self.course.holes[:self.holes_to_play]
+        nine  = min(9, self.holes_to_play)
 
-        for group_start, label in [(1, "FRONT"), (10, "BACK")]:
-            for h_num in range(group_start, group_start + 9):
-                hole = self.course.holes[h_num - 1]
-                # Hole number
-                tk.Label(parent, text=str(h_num), bg=_DARK, fg="#AAAAAA",
-                         font=ROW, width=5, anchor="center").grid(
-                             row=cur_row, column=0, sticky="ew", **PAD)
-                # Par
-                tk.Label(parent, text=str(hole.par), bg=_DARK, fg="#AAAAAA",
-                         font=ROW, width=5, anchor="center").grid(
-                             row=cur_row, column=1, sticky="ew", **PAD)
-                # Score (mutable)
+        # Front nine (always present)
+        for i in range(nine):
+            h = holes[i]
+            cell(str(h.number), cur, 0, fg="#AAAAAA")
+            cell(str(h.par),    cur, 1, fg="#AAAAAA")
+            sc = tk.Label(parent, text="–", bg=_DARK, fg=_DIM,
+                          font=ROW, width=5, anchor="center")
+            sc.grid(row=cur, column=2, sticky="ew", **PAD)
+            self.score_cells[h.number] = sc
+            cur += 1
+
+        divrow(cur); cur += 1
+        front_par = sum(h.par for h in holes[:nine])
+        cell("F9", cur, 0, fg=_YELLOW, bg="#222222", font=HDR)
+        cell(str(front_par), cur, 1, fg="#AAAAAA", bg="#222222", font=HDR)
+        self.lbl_front_total = tk.Label(parent, text="–", bg="#222222",
+                                        fg=_DIM, font=HDR, width=5, anchor="center")
+        self.lbl_front_total.grid(row=cur, column=2, sticky="ew", **PAD)
+        cur += 1
+
+        if self.holes_to_play == 18:
+            divrow(cur, thick=True); cur += 1
+            # Back nine
+            for i in range(9, 18):
+                h = holes[i]
+                cell(str(h.number), cur, 0, fg="#AAAAAA")
+                cell(str(h.par),    cur, 1, fg="#AAAAAA")
                 sc = tk.Label(parent, text="–", bg=_DARK, fg=_DIM,
                               font=ROW, width=5, anchor="center")
-                sc.grid(row=cur_row, column=2, sticky="ew", **PAD)
-                self.score_cells[h_num] = sc
-                cur_row += 1
+                sc.grid(row=cur, column=2, sticky="ew", **PAD)
+                self.score_cells[h.number] = sc
+                cur += 1
 
-            # Nine subtotal
-            div(cur_row)
-            cur_row += 1
-            nine_par = sum(self.course.holes[i].par
-                           for i in range(group_start - 1, group_start + 8))
-            tk.Label(parent, text=label[:1] + "9", bg="#222222", fg=_YELLOW,
-                     font=HDR, width=5, anchor="center").grid(
-                         row=cur_row, column=0, sticky="ew", padx=1, pady=1)
-            tk.Label(parent, text=str(nine_par), bg="#222222", fg="#AAAAAA",
-                     font=HDR, width=5, anchor="center").grid(
-                         row=cur_row, column=1, sticky="ew", padx=1, pady=1)
-            lbl_nine = tk.Label(parent, text="–", bg="#222222", fg=_DIM,
-                                font=HDR, width=5, anchor="center")
-            lbl_nine.grid(row=cur_row, column=2, sticky="ew", padx=1, pady=1)
-            if group_start == 1:
-                self.lbl_front_total = lbl_nine
-            else:
-                self.lbl_back_total  = lbl_nine
-            cur_row += 1
-            div(cur_row, thick=True)
-            cur_row += 1
+            divrow(cur); cur += 1
+            back_par = sum(h.par for h in holes[9:])
+            cell("B9",  cur, 0, fg=_YELLOW, bg="#222222", font=HDR)
+            cell(str(back_par), cur, 1, fg="#AAAAAA", bg="#222222", font=HDR)
+            self.lbl_back_total = tk.Label(parent, text="–", bg="#222222",
+                                           fg=_DIM, font=HDR, width=5, anchor="center")
+            self.lbl_back_total.grid(row=cur, column=2, sticky="ew", **PAD)
+            cur += 1
 
-        # Grand total
-        tk.Label(parent, text="TOT", bg="#333333", fg=_YELLOW,
-                 font=HDR, width=5, anchor="center").grid(
-                     row=cur_row, column=0, sticky="ew", padx=1, pady=1)
-        tk.Label(parent, text=str(self.course.total_par),
-                 bg="#333333", fg="#AAAAAA",
-                 font=HDR, width=5, anchor="center").grid(
-                     row=cur_row, column=1, sticky="ew", padx=1, pady=1)
-        self.lbl_total = tk.Label(parent, text="–", bg="#333333", fg=_DIM,
-                                  font=HDR, width=5, anchor="center")
-        self.lbl_total.grid(row=cur_row, column=2, sticky="ew", padx=1, pady=1)
+            divrow(cur, thick=True); cur += 1
+            total_par = sum(h.par for h in holes)
+            cell("TOT", cur, 0, fg=_YELLOW, bg="#333333", font=HDR)
+            cell(str(total_par), cur, 1, fg="#AAAAAA", bg="#333333", font=HDR)
+            self.lbl_total = tk.Label(parent, text="–", bg="#333333",
+                                      fg=_DIM, font=HDR, width=5, anchor="center")
+            self.lbl_total.grid(row=cur, column=2, sticky="ew", **PAD)
+        else:
+            # Front 9 only — F9 row doubles as the total
+            self.lbl_back_total = self.lbl_front_total  # alias so update code works
+            self.lbl_total      = self.lbl_front_total
 
     def _update_scorecard(self) -> None:
-        """Refresh scorecard cells with current scores."""
-        front, back = 0, 0
-        front_par   = sum(h.par for h in self.course.holes[:9])
-        back_par    = sum(h.par for h in self.course.holes[9:])
+        holes  = self.course.holes[:self.holes_to_play]
+        front  = 0
+        back   = 0
+        fp     = sum(h.par for h in holes[:min(9, self.holes_to_play)])
+        bp     = sum(h.par for h in holes[9:]) if self.holes_to_play == 18 else 0
 
         for i, score in enumerate(self.scores):
-            h_num = i + 1
-            hole  = self.course.holes[i]
-            color = _score_color(score, hole.par)
-            self.score_cells[h_num].config(text=str(score), fg=color)
-            if h_num <= 9:
+            h     = holes[i]
+            color = _score_color(score, h.par)
+            self.score_cells[h.number].config(text=str(score), fg=color)
+            if i < 9:
                 front += score
             else:
                 back  += score
 
         played = len(self.scores)
-        if played > 0:
-            if played >= 9:
-                self.lbl_front_total.config(
-                    text=str(front),
-                    fg=_score_color(front, front_par))
+        if played >= min(9, self.holes_to_play):
+            self.lbl_front_total.config(
+                text=str(front), fg=_score_color(front, fp))
+        if self.holes_to_play == 18:
             if played > 9:
                 self.lbl_back_total.config(
-                    text=str(back),
-                    fg=_score_color(back, back_par))
-            total = front + back
-            self.lbl_total.config(
-                text=str(total),
-                fg=_score_color(total, front_par + back_par if played == 18
-                                else total))  # neutral while in progress
+                    text=str(back), fg=_score_color(back, bp))
+            if played == 18:
+                self.lbl_total.config(
+                    text=str(front + back),
+                    fg=_score_color(front + back, fp + bp))
+
+    # ── Game management ────────────────────────────────────────────────────────
+
+    def _new_game(self) -> None:
+        """Open the start dialog and, if confirmed, reset to a new course."""
+        opts = _show_start_dialog(self.root, default_seed=self.seed)
+        if opts is None:
+            return
+        new_seed, new_holes = opts
+        self.seed          = new_seed
+        self.holes_to_play = new_holes
+        self.course        = generate_course("Procedural Pines Golf Club",
+                                              seed=new_seed)
+        self.mulligans     = MULLIGANS_PER_COURSE
+        self.scores        = []
+        self.hole_idx      = 0
+
+        # Clear the log
+        self.log.config(state="normal")
+        self.log.delete("1.0", "end")
+        self.log.config(state="disabled")
+
+        self._build_scorecard()
+        self._start_hole()
 
     # ── Game flow ──────────────────────────────────────────────────────────────
 
@@ -302,7 +395,7 @@ class GolfApp:
         self._refresh()
 
     def _pick(self, choice: str) -> None:
-        if self.choosing:
+        if self.choosing and choice != 'p':
             return
         self.first_roll = False
         self.chosen     = choice
@@ -327,9 +420,9 @@ class GolfApp:
         for key in DIRS:
             result = compute_shot(self.state, key, roll)
             if result.valid:
-                self.valid_moves[result.final_pos] = key
+                self.valid_moves[result.landing_pos] = key
                 if result.penalty_strokes > 0:
-                    self.penalty_moves.add(result.final_pos)
+                    self.penalty_moves.add(result.landing_pos)
 
     def _on_canvas_click(self, event: tk.Event) -> None:
         if not self.choosing:
@@ -366,24 +459,26 @@ class GolfApp:
     def _next_hole(self) -> None:
         self.scores.append(self.state.strokes)
         self._update_scorecard()
-        if self.hole_idx + 1 >= len(self.course.holes):
+        if self.hole_idx + 1 >= self.holes_to_play:
             self._show_final_scorecard()
             return
         self.hole_idx += 1
         self._start_hole()
 
     def _show_final_scorecard(self) -> None:
+        holes = self.course.holes[:self.holes_to_play]
         total = sum(self.scores)
-        par   = self.course.total_par
+        par   = sum(h.par for h in holes)
         diff  = total - par
         sign  = f"+{diff}" if diff > 0 else str(diff)
-        lines = [self.course.name, f"Total  {total}  ({sign})", ""]
-        for s, h in zip(self.scores, self.course.holes):
+        lines = [self.course.name,
+                 f"{'Front 9' if self.holes_to_play == 9 else 'Full Course'}",
+                 f"Total  {total}  ({sign})", ""]
+        for s, h in zip(self.scores, holes):
             d  = s - h.par
             ds = f"+{d}" if d > 0 else str(d)
             lines.append(f"  H{h.number:>2}  {s}  ({ds})  {score_label(s, h.par)}")
-        messagebox.showinfo("Course Complete", "\n".join(lines))
-        self.root.quit()
+        messagebox.showinfo("Round Complete", "\n".join(lines))
 
     # ── Rendering ──────────────────────────────────────────────────────────────
 
@@ -393,7 +488,7 @@ class GolfApp:
         terrain = hole.grid[br][bc]
 
         self.lbl_hole.config(
-            text=f"Hole {self.hole_idx + 1} / 18  ·  Par {hole.par}")
+            text=f"Hole {self.hole_idx + 1} / {self.holes_to_play}  ·  Par {hole.par}")
         near = (terrain == Terrain.FAIRWAY
                 and abs(bc - hole.pin[0]) <= 2
                 and abs(br - hole.pin[1]) <= 2)
@@ -409,7 +504,6 @@ class GolfApp:
         choosing = self.choosing
         can_mull = rolling and (self.first_roll or self.mulligans > 0)
 
-        # Die buttons show current roll values; highlight chosen die
         def die_style(key):
             active = choosing and self.chosen == key
             return dict(bg=_YELLOW if active else "#333333",
@@ -419,16 +513,15 @@ class GolfApp:
         self.btn_d2.config(text=str(self.roll[1]), **die_style("d2"))
         self.btn_putt.config(**die_style("p"))
         self.btn_mull.config(
-            text=("Retry" if (rolling and self.first_roll) else "Mulli"),
+            text="Retry" if (rolling and self.first_roll) else "Mulli",
             bg="#444444" if can_mull else "#222222",
             fg=_WHITE    if can_mull else _DIM)
 
         self._en(self.btn_d1,   rolling)
         self._en(self.btn_d2,   rolling)
-        self._en(self.btn_putt, rolling)
+        self._en(self.btn_putt, rolling or choosing)
         self.btn_mull.config(state="normal" if can_mull else "disabled")
 
-        # Distance hint
         if choosing:
             if self.chosen == "p":
                 self.lbl_dist.config(text="Putt: 1 sq")
@@ -445,6 +538,9 @@ class GolfApp:
         btn.config(state="normal" if on else "disabled",
                    bg="#444444" if on else "#222222",
                    fg=_WHITE    if on else _DIM)
+
+    def _cell_center(self, c: int, r: int) -> tuple[int, int]:
+        return c * CELL + CELL // 2, r * CELL + CELL // 2
 
     def _draw_grid(self) -> None:
         self.canvas.delete("all")
@@ -492,6 +588,22 @@ class GolfApp:
                     self.canvas.create_rectangle(x1+1, y1+1, x2-1, y2-1,
                                                  fill="", outline=border, width=2)
 
+        # ── History trail — line connecting every ghost to ball ───────────────
+        trail = list(self.state.history) + [bpos]
+        for i in range(len(trail) - 1):
+            x1, y1 = self._cell_center(*trail[i])
+            x2, y2 = self._cell_center(*trail[i + 1])
+            self.canvas.create_line(x1, y1, x2, y2,
+                                    fill="#555555", width=1, dash=(3, 3))
+
+        # ── Shot-direction lines to each valid destination ────────────────────
+        if self.choosing and self.valid_moves:
+            bx, by = self._cell_center(*bpos)
+            for dest in self.valid_moves:
+                dx, dy = self._cell_center(*dest)
+                self.canvas.create_line(bx, by, dx, dy,
+                                        fill="#888866", width=1, dash=(2, 4))
+
     def _log(self, msg: str) -> None:
         self.log.config(state="normal")
         self.log.insert("end", msg + "\n")
@@ -502,8 +614,28 @@ class GolfApp:
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def run_game(course: CourseData | None = None, seed: int = 42) -> None:
-    if course is None:
-        course = generate_course("Procedural Pines Golf Club", seed=seed)
+    """Show the start dialog then launch the game window."""
     root = tk.Tk()
-    GolfApp(root, course)
+    root.withdraw()   # hide until options are chosen
+
+    opts = _show_start_dialog(root, default_seed=seed)
+    if opts is None:
+        root.destroy()
+        return
+
+    chosen_seed, holes_to_play = opts
+    if course is None:
+        course = generate_course("Procedural Pines Golf Club", seed=chosen_seed)
+
+    root.deiconify()
+    GolfApp(root, course, holes_to_play=holes_to_play, seed=chosen_seed)
+
+    # Centre the fully-built window on the screen.
+    root.update_idletasks()
+    w  = root.winfo_width()
+    h  = root.winfo_height()
+    sw = root.winfo_screenwidth()
+    sh = root.winfo_screenheight()
+    root.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
+
     root.mainloop()

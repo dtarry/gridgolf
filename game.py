@@ -53,7 +53,8 @@ class HoleState:
 @dataclass
 class ShotResult:
     valid:            bool
-    final_pos:        tuple[int, int]
+    final_pos:        tuple[int, int]   # post-slope, post-wind
+    landing_pos:      tuple[int, int]   # raw shot endpoint before slope/wind
     distance:         int
     penalty_strokes:  int       = 0
     messages:         list[str] = field(default_factory=list)
@@ -118,14 +119,17 @@ def follow_slopes(pos: tuple[int, int],
 
 
 def apply_wind(pos: tuple[int, int],
-               hole: HoleData) -> tuple[tuple[int, int], list[str]]:
-    """Move ball wind_speed cells in wind_dir after landing. Trees stop movement."""
+               hole: HoleData,
+               max_steps: int | None = None) -> tuple[tuple[int, int], list[str]]:
+    """Move ball in wind_dir after landing. Trees stop movement.
+    max_steps overrides wind_speed (used to cap wind after slope movement)."""
     if hole.wind_speed == 0:
         return pos, []
     dc, dr  = ARROW_DIR[hole.wind_dir]
     c, r    = pos
     moved   = 0
-    for _ in range(hole.wind_speed):
+    steps   = min(hole.wind_speed, max_steps) if max_steps is not None else hole.wind_speed
+    for _ in range(steps):
         nc, nr = c + dc, r + dr
         if not (0 <= nc < WIDTH and 0 <= nr < HEIGHT):
             break
@@ -133,7 +137,7 @@ def apply_wind(pos: tuple[int, int],
             break
         c, r  = nc, nr
         moved += 1
-    msgs = ([f"Wind {hole.wind_dir} ×{hole.wind_speed} → col {c+1}, row {r+1}"]
+    msgs = ([f"Wind {hole.wind_dir} ×{moved} → col {c+1}, row {r+1}"]
             if moved else [])
     return (c, r), msgs
 
@@ -175,6 +179,14 @@ def compute_shot(state: HoleState,
 
     # ── 2. Tree obstacle rules (skip for putts — they're too short to clear) ──
     path = _walk(bc, br, dc, dr, dist)
+
+    # ── 2a. Overshoot-by-one → immediate hole-in ──────────────────────────────
+    if roll is not None and len(path) >= 2 and path[-2] == state.hole.pin:
+        msgs.append("Clears over the hole — counts as in!")
+        msgs.append("⛳ In the hole!")
+        return ShotResult(valid=True, final_pos=state.hole.pin,
+                          landing_pos=state.hole.pin, distance=dist, messages=msgs)
+
     trees_in_path = [p for p in path
                      if state.hole.grid[p[1]][p[0]] == Terrain.TREES]
 
@@ -182,41 +194,42 @@ def compute_shot(state: HoleState,
         endpoint_terrain = state.hole.grid[path[-1][1]][path[-1][0]]
 
         if origin == Terrain.FAIRWAY:
-            # Must clear: ball can fly through but endpoint can't be trees
             if endpoint_terrain == Terrain.TREES:
                 return ShotResult(
-                    valid=False, final_pos=state.ball, distance=dist,
+                    valid=False, final_pos=state.ball, landing_pos=state.ball,
+                    distance=dist,
                     error="Not enough distance to clear the trees from fairway."
                 )
             msgs.append("Clearing trees (fairway).")
 
         elif origin == Terrain.ROUGH:
-            # -1 distance penalty; endpoint still can't be trees
             dist = max(1, dist - 1)
             path = _walk(bc, br, dc, dr, dist)
             endpoint_terrain = state.hole.grid[path[-1][1]][path[-1][0]]
             if endpoint_terrain == Terrain.TREES:
                 return ShotResult(
-                    valid=False, final_pos=state.ball, distance=dist,
+                    valid=False, final_pos=state.ball, landing_pos=state.ball,
+                    distance=dist,
                     error="Can't land in trees even with rough penalty (-1 sq)."
                 )
             msgs.append(f"Trees rough-penalty -1 → {dist} sq.")
 
         else:
-            # Bunker, slope, etc. — cannot enter trees
             return ShotResult(
-                valid=False, final_pos=state.ball, distance=dist,
+                valid=False, final_pos=state.ball, landing_pos=state.ball,
+                distance=dist,
                 error=f"Can't shoot through trees from {origin.value}."
             )
 
-    # ── 3. Final endpoint checks ───────────────────────────────────────────────
-    endpoint = path[-1]
-    ec, er   = endpoint
+    # ── 3. Final endpoint (landing position — snapshot before any effects) ────
+    endpoint     = path[-1]
+    ec, er       = endpoint
+    landing_pos  = endpoint          # fixed reference used for highlighting
 
     if state.hole.grid[er][ec] == Terrain.TREES:
         return ShotResult(
-            valid=False, final_pos=state.ball, distance=dist,
-            error="Can't land in trees."
+            valid=False, final_pos=state.ball, landing_pos=state.ball,
+            distance=dist, error="Can't land in trees."
         )
 
     land_terrain = state.hole.grid[er][ec]
@@ -225,23 +238,28 @@ def compute_shot(state: HoleState,
     # Immediate hole-out before any post-landing effects
     if endpoint == state.hole.pin:
         msgs.append("⛳ In the hole!")
-        return ShotResult(valid=True, final_pos=endpoint, distance=dist, messages=msgs)
+        return ShotResult(valid=True, final_pos=endpoint, landing_pos=landing_pos,
+                          distance=dist, messages=msgs)
 
     # ── 4. Direct water landing ────────────────────────────────────────────────
     if land_terrain == Terrain.WATER:
         msgs.append("Water hazard!  +1 penalty stroke, back to previous lie.")
-        return ShotResult(valid=True, final_pos=state.prev, distance=dist,
-                          penalty_strokes=1, messages=msgs)
+        return ShotResult(valid=True, final_pos=state.prev, landing_pos=landing_pos,
+                          distance=dist, penalty_strokes=1, messages=msgs)
 
     # ── 5. Slope chain ─────────────────────────────────────────────────────────
     post_slope, slope_msgs = follow_slopes(endpoint, state.hole)
     msgs.extend(slope_msgs)
-    endpoint = post_slope
-    ec, er   = endpoint
+    was_sloped = post_slope != endpoint   # did the slope actually move the ball?
+    endpoint   = post_slope
+    ec, er     = endpoint
 
-    # ── 6. Wind (putts are unaffected) ────────────────────────────────────────
-    if roll is not None:
-        post_wind, wind_msgs = apply_wind(endpoint, state.hole)
+    # ── 6. Wind (putts unaffected; bunker landing cancels; slope caps at 1) ────
+    if roll is not None and land_terrain != Terrain.BUNKER:
+        post_wind, wind_msgs = apply_wind(
+            endpoint, state.hole,
+            max_steps=1 if was_sloped else None
+        )
         msgs.extend(wind_msgs)
         endpoint = post_wind
         ec, er   = endpoint
@@ -249,10 +267,11 @@ def compute_shot(state: HoleState,
     # ── 7. Water after post-landing movement ───────────────────────────────────
     if state.hole.grid[er][ec] == Terrain.WATER:
         msgs.append("Carried into water!  +1 penalty stroke, back to previous lie.")
-        return ShotResult(valid=True, final_pos=state.prev, distance=dist,
-                          penalty_strokes=1, messages=msgs)
+        return ShotResult(valid=True, final_pos=state.prev, landing_pos=landing_pos,
+                          distance=dist, penalty_strokes=1, messages=msgs)
 
-    return ShotResult(valid=True, final_pos=endpoint, distance=dist, messages=msgs)
+    return ShotResult(valid=True, final_pos=endpoint, landing_pos=landing_pos,
+                      distance=dist, messages=msgs)
 
 
 def apply_shot(state: HoleState,
