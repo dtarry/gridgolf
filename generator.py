@@ -6,9 +6,8 @@ from .models import Terrain, HoleData, CourseData
 WIDTH  = 16
 HEIGHT = 26
 
-# 4 par-3s (3,7,12,16), 4 par-5s (5,9,13,17), 10 par-4s → total 72.
-_PAR_LAYOUT = [4, 4, 3, 4, 5, 4, 3, 4, 5,   # front 9 = 36
-               4, 4, 3, 5, 4, 4, 3, 5, 4]    # back  9 = 36 → total 72
+# All holes par 6 → total 108.
+_PAR_LAYOUT = [6] * 18
 
 
 # ── Geometry ──────────────────────────────────────────────────────────────────

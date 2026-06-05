@@ -30,7 +30,8 @@ def _plain(bg: str) -> str:
 
 
 def render_hole(hole: HoleData,
-                ball_pos: tuple[int, int] | None = None) -> str:
+                ball_pos: tuple[int, int] | None = None,
+                ghost_pos: set[tuple[int, int]] | None = None) -> str:
     tc, tr    = hole.tee
     pc, pr    = hole.pin
     direction = "left" if pc < tc else "right"
@@ -55,6 +56,8 @@ def render_hole(hole: HoleData,
                 row += _block(_WHITE_BG, f"{_BOLD}\033[30m", "T")
             elif ball_pos == (c, r):
                 row += _block("\033[43m", f"{_BOLD}\033[30m", "@")
+            elif ghost_pos and (c, r) in ghost_pos:
+                row += _block(TERRAIN_PROPS[hole.grid[r][c]].bg, "\033[37m", "○")
             else:
                 t  = hole.grid[r][c]
                 bg = TERRAIN_PROPS[t].bg
@@ -98,17 +101,19 @@ def _build_legend() -> list[str]:
 _LEGEND_LINES = _build_legend()
 
 
-def _wind_lines(hole: HoleData) -> list[str]:
+def _wind_lines(hole: HoleData, mulligans: int = 0) -> list[str]:
     w = 24
     sep   = f"  {'─'*w}"
     label = "calm" if hole.wind_speed == 0 else f"{hole.wind_dir}  {'▪' * hole.wind_speed}"
-    return [sep, f"  Wind: {label}", sep, "  Mulligans: "]
+    return [sep, f"  Wind: {label}", sep, f"  Mulligans: {mulligans}"]
 
 
 def render_hole_with_legend(hole: HoleData,
-                            ball_pos: tuple[int, int] | None = None) -> str:
-    hole_lines   = render_hole(hole, ball_pos).splitlines()
-    legend_lines = _LEGEND_LINES[:] + _wind_lines(hole)
+                            ball_pos: tuple[int, int] | None = None,
+                            mulligans: int = 0,
+                            ghost_pos: set[tuple[int, int]] | None = None) -> str:
+    hole_lines   = render_hole(hole, ball_pos, ghost_pos).splitlines()
+    legend_lines = _LEGEND_LINES[:] + _wind_lines(hole, mulligans)
 
     n = max(len(hole_lines), len(legend_lines))
     hole_lines   += [""] * (n - len(hole_lines))
